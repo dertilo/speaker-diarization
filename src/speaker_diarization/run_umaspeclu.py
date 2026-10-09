@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import time
 
 from speaker_diarization.audio import load_mono_16k
@@ -32,15 +33,25 @@ def run(
     vad_model: str,
     out_rttm_path: str | None = None,
     use_calibration_anchors: bool = False,
+    jobs: int = 1,
 ) -> None:
-    t0 = time.time()
+    t_start = time.time()
+    stage_times: dict[str, float] = {}
+
+    t = time.time()
     samples = load_mono_16k(audio_path)
     duration = len(samples) / 16_000
+    stage_times["audio decode"] = time.time() - t
     print(f"loaded audio: {duration:.1f}s")
 
-    embedder = TitaNetEmbedder(titanet_model)
+    t = time.time()
+    embedder = TitaNetEmbedder(titanet_model, num_threads=jobs)
+    stage_times["model load"] = time.time() - t
+
+    t = time.time()
     windows = embedder.embed_windows(samples, window=1.5, shift=0.75)
-    print(f"embedded {len(windows)} windows ({time.time() - t0:.1f}s so far)")
+    stage_times["embedding"] = time.time() - t
+    print(f"embedded {len(windows)} windows ({time.time() - t_start:.1f}s so far)")
 
     import numpy as np
 
@@ -61,6 +72,7 @@ def run(
     if use_calibration_anchors:
         embeddings = np.concatenate([embeddings, anchor_embeddings], axis=0)
 
+    t = time.time()
     labels = cluster_embeddings(
         embeddings,
         n_neighbors=60,
@@ -68,6 +80,10 @@ def run(
         metric="euclidean",
         min_cluster_size=3,
     )
+    # UMAP's numba-jitted internals are compiled on first call in this process;
+    # that one-time compile cost is included in this stage's time (no separate
+    # warmup run here, since a full pipeline run only clusters once).
+    stage_times["umap+hdbscan"] = time.time() - t
     print(f"clusters found: {sorted(set(labels.tolist()))}")
 
     if use_calibration_anchors:
@@ -75,23 +91,31 @@ def run(
 
     turns = windows_to_turns(windows, labels.tolist(), min_gap=0.5)
 
+    t = time.time()
     speech_spans = detect_speech_spans(samples, vad_model, threshold=0.7)
     speech_spans = merge_close_spans(speech_spans, max_gap=0.5)
+    stage_times["vad"] = time.time() - t
     print(f"VAD speech spans: {len(speech_spans)}")
 
     turns = drop_non_speech_clusters(turns, speech_spans, min_speech_overlap=0.5)
     print(f"turns after non-speech filtering: {len(turns)}")
 
-    runtime = time.time() - t0
-    print(f"total runtime: {runtime:.1f}s ({duration / runtime:.1f}x realtime)")
-
     if out_rttm_path:
         write_rttm(out_rttm_path, "oLnl1D6owYA", turns)
 
+    t = time.time()
     ref_turns = read_rttm(ref_rttm_path)
     scores = score(ref_turns, turns, collar=0.25)
+    stage_times["scoring"] = time.time() - t
     print(scores.as_percent())
-    return runtime, scores
+
+    runtime = time.time() - t_start
+    print(f"total runtime: {runtime:.1f}s ({duration / runtime:.1f}x realtime)")
+    print("per-stage timings (s):")
+    for name, dt in stage_times.items():
+        print(f"  {name:<15} {dt:.2f}")
+
+    return runtime, scores, stage_times
 
 
 def main() -> None:
@@ -110,6 +134,17 @@ def main() -> None:
             "the old pipeline only, not a fair unsupervised score."
         ),
     )
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=max(1, (os.cpu_count() or 2) // 2),
+        help=(
+            "CPU threads for TitaNet embedding (ONNX Runtime intra-op parallelism "
+            "of a single extractor). Default: physical core count "
+            "(os.cpu_count() // 2)."
+        ),
+    )
     args = parser.parse_args()
     run(
         args.audio,
@@ -118,6 +153,7 @@ def main() -> None:
         args.vad_model,
         args.out_rttm,
         use_calibration_anchors=args.use_calibration_anchors,
+        jobs=args.jobs,
     )
 
 

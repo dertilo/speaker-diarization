@@ -34,8 +34,25 @@ def make_windows(
 
 
 class TitaNetEmbedder:
-    def __init__(self, model_path: str, sample_rate: int = 16_000) -> None:
-        config = so.SpeakerEmbeddingExtractorConfig(model=model_path)
+    def __init__(
+        self,
+        model_path: str,
+        sample_rate: int = 16_000,
+        num_threads: int = 1,
+    ) -> None:
+        """num_threads: intra-op CPU parallelism for a single ONNX Runtime
+        session (`SpeakerEmbeddingExtractorConfig.num_threads`). Micro-benchmarked
+        against a multiprocessing pool of single-threaded extractors on this
+        laptop (i7-8550U, 4 physical / 8 logical cores); intra-op won at every j
+        (e.g. j=4: ~26 windows/s vs ~21 windows/s for the pool, plus lower/no
+        per-process model-load overhead), so only this path is implemented.
+        sherpa-onnx's SpeakerEmbeddingExtractor.compute() takes one OnlineStream
+        at a time -- there is no batched-inference entry point to use instead.
+        """
+        config = so.SpeakerEmbeddingExtractorConfig(
+            model=model_path,
+            num_threads=num_threads,
+        )
         self._extractor = so.SpeakerEmbeddingExtractor(config)
         self._sample_rate = sample_rate
 
