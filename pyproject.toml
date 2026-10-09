@@ -7,7 +7,16 @@ authors = [
     { name = "Tilo Himmelsbach", email = "dertilo@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "sherpa-onnx==1.13.4",
+    "sherpa-onnx-core==1.13.4",
+    "umap-learn>=0.5.6",
+    "scikit-learn>=1.5.0",
+    "pyannote.metrics>=3.2",
+    "pyannote.core>=5.0",
+    "numpy>=1.26",
+    "av>=12.0",
+]
 
 [project.scripts]
 speaker-diarization = "speaker_diarization:main"
