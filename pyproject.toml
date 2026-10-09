@@ -1,0 +1,17 @@
+[project]
+name = "speaker-diarization"
+version = "0.1.0"
+description = "Speaker diarization experiments: TitaNet embeddings + UMAP + HDBSCAN (umaspeclu), scored by speaker confusion"
+readme = "README.md"
+authors = [
+    { name = "Tilo Himmelsbach", email = "dertilo@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+speaker-diarization = "speaker_diarization:main"
+
+[build-system]
+requires = ["uv_build>=0.10.7,<0.11.0"]
+build-backend = "uv_build"
