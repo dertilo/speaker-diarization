@@ -20,9 +20,18 @@ def windows_to_turns(
     for w, label in zip(windows, labels, strict=True):
         name = "noise" if label == -1 else f"speaker_{label}"
         if turns and turns[-1].label == name and w.start - turns[-1].end <= min_gap:
-            turns[-1] = Turn(start=turns[-1].start, end=w.end, label=name)
+            turns[-1] = Turn(start=turns[-1].start, end=max(turns[-1].end, w.end), label=name)
         else:
-            turns.append(Turn(start=w.start, end=w.end, label=name))
+            start = w.start
+            if turns and w.start < turns[-1].end:
+                # Overlapping windows (e.g. 1.5s window / 0.75s hop) at a
+                # label change would otherwise make the hyp turns overlap,
+                # which the scorer counts as a false alarm. Cut at the
+                # midpoint of the overlap instead.
+                mid = (w.start + turns[-1].end) / 2
+                turns[-1] = Turn(start=turns[-1].start, end=mid, label=turns[-1].label)
+                start = mid
+            turns.append(Turn(start=start, end=w.end, label=name))
     return turns
 
 
