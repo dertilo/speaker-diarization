@@ -25,6 +25,13 @@ CALIBRATION_ANCHORS = [
     (75.0, 85.0, "DW-jingle"),
 ]
 
+# sherpa-onnx speaker-embedding models usable interchangeably with TitaNetEmbedder
+# (it just wraps SpeakerEmbeddingExtractorConfig(model=...), model-agnostic).
+EMBEDDER_MODELS = {
+    "titanet": "models/nemo_en_titanet_large.onnx",
+    "resnet34": "models/wespeaker_en_voxceleb_resnet34_LM.onnx",
+}
+
 
 def run(
     audio_path: str,
@@ -122,7 +129,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--audio", default="data/oLnl1D6owYA.opus")
     parser.add_argument("--ref-rttm", default="data/oLnl1D6owYA_ref.rttm")
-    parser.add_argument("--titanet-model", default="models/nemo_en_titanet_large.onnx")
+    parser.add_argument(
+        "--embedder",
+        choices=sorted(EMBEDDER_MODELS),
+        default="titanet",
+        help="Which sherpa-onnx speaker-embedding model to use.",
+    )
+    parser.add_argument(
+        "--titanet-model",
+        default=None,
+        help="Override the embedding model path (default: --embedder's model).",
+    )
     parser.add_argument("--vad-model", default="models/silero_vad.onnx")
     parser.add_argument("--out-rttm", default="runs/oLnl1D6owYA_pred.rttm")
     parser.add_argument(
@@ -146,10 +163,11 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    titanet_model = args.titanet_model or EMBEDDER_MODELS[args.embedder]
     run(
         args.audio,
         args.ref_rttm,
-        args.titanet_model,
+        titanet_model,
         args.vad_model,
         args.out_rttm,
         use_calibration_anchors=args.use_calibration_anchors,
