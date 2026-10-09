@@ -17,9 +17,13 @@ source. Sources: `nmaudio-speaker-diarization/nmaudio_speaker_diarization/speake
 2. **Windowing for embedding**: overlapping sub-segments, `window=1.5s`, `shift/step=0.75s`
    (NeMo's `get_subsegments` logic), computed per non-overlapping input audio span (here: one span = the whole file).
 3. **Embedding**: TitaNet-large (NeMo), one 192-dim vector per window.
-4. **Normalization**: NeMo's `embedding_normalize` (L2-normalize then re-center/scale by
-   stats) applied to the full embedding matrix (including calibration anchors, see below)
-   before UMAP.
+4. **Normalization**: NeMo's `embedding_normalize` (mean-center each column across the
+   batch, then L2-normalize each row; optional std-scaling is off by default and not
+   used here) applied to the full embedding matrix (including calibration anchors, see
+   below) before UMAP. Verified against NeMo's source
+   (`nemo/collections/asr/parts/utils/speaker_utils.py`, `embedding_normalize`,
+   GitHub `NVIDIA/NeMo@main`, 2026-10-09): `embs = embs - embs.mean(axis=0)` then
+   `embs = embs / norm(embs, axis=-1)`.
 5. **Calibration anchors**: a few manually-labeled reference snippets of the *same* file
    (3 anchors here: 2 known speakers + "DW-jingle" non-speech) are embedded the same way,
    concatenated to the real embeddings before UMAP/HDBSCAN, offset far in time so they
@@ -41,16 +45,26 @@ source. Sources: `nmaudio-speaker-diarization/nmaudio_speaker_diarization/speake
    clusters including HDBSCAN noise if its turns overlap little with VAD speech). Note
    this does **not** drop individual `-1`-labelled windows directly, it is a cluster-level
    filter keyed by majority label.
-10. **Scoring**: `speechbrain_DER` (wraps NIST `md-eval-22.pl`), `collar=0.25`,
-    `ignore_overlap=True`. Reports (as percent of total reference speaker time):
-    `miss_speaker`, `fa_speaker`, `SER` (= speaker confusion / error), `DER` = sum of the
-    three. The three component terms are **not** symmetric in ref/hyp like a naive score --
-    DER is computed over the reference's scored speaker time, which is why the README calls
-    out that the hand labels are coarse: predicted turns are finer-grained than the
-    manually drawn reference turns, so a lot of correctly-labelled speech falls in gaps
-    between reference turns and counts as neither hit nor miss, while genuinely unlabeled
-    predicted speech outside any reference turn counts as miss. (README: SER 2.08, DER 17.6,
-    of which miss 15.1, fa 0.38.)
+10. **Scoring**: `speechbrain_DER` (calls `md-eval.pl` with `-r ref_rttm -s sys_rttm`,
+    i.e. ref then hyp, standard NIST order -- checked the call site, it is **not**
+    swapped), `collar=0.25`, `ignore_overlap=True`. Reports (as percent of reference
+    speaker time, the "SCORED SPEAKER TIME" denominator, which depends only on the
+    reference, not on how much the hypothesis covers): `miss_speaker`, `fa_speaker`,
+    `SER` (= speaker confusion / error), `DER` = sum of the three. The three component
+    terms are **not** symmetric in ref/hyp like a naive score -- DER is computed over
+    the reference's scored speaker time, which is why the README calls out that the
+    hand labels are coarse: predicted turns are finer-grained than the manually drawn
+    reference turns, so a lot of correctly-labelled speech falls in gaps between
+    reference turns and counts as neither hit nor miss, while genuinely unlabeled
+    predicted speech outside any reference turn counts as **false alarm**, not miss
+    (miss is reference speaker-time that the system fails to cover at all; confirmed by
+    running `md-eval.pl` directly on our own re-implementation's output -- see report
+    for the validation round -- its per-run false-alarm time moves with how much extra,
+    unmatched speech our predictions contain, while miss stays essentially flat). (README:
+    SER 2.08, DER 17.6, of which miss 15.1, fa 0.38 -- the old run's very low FA and high
+    miss stem from its coarse/sparse hand-labeled reference plus the calibration-anchor
+    assisted clustering dropping most non-speech/stray clusters, not from any ref/hyp
+    swap.)
 
 ## Params not used for the README number but seen elsewhere
 
